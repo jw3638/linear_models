@@ -1,0 +1,70 @@
+---
+title: "linear_models"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(p8105.datasets)
+```
+
+Load NYC airbnb data
+```{r}
+data(nyc_airbnb)
+```
+
+Look at the data
+```{r}
+nyc_airbnb =
+  nyc_airbnb |>
+  mutate(
+    stars = review_scores_location / 2
+  ) |>
+  rename(
+    borough = neighbourhood_group
+  ) |>
+  filter(borough !="Staten Island") |>
+  select(price, stars, borough, room_type, neighbourhood)
+```
+
+Do regression!
+```{r}
+fit = lm(price ~ stars + borough, data = nyc_airbnb)
+```
+
+Do some additional cleaning then refit. fct_freq function looks through your data and makes the reference group the most popular one. In this case it's Manhattan. Without telling it what to do, it goes by alphabetical order (first one in the alphabet will be the reference by default)
+```{r}
+nyc_airbnb =
+  nyc_airbnb |>
+  mutate(
+    borough = fct_infreq(borough),
+    room_type = fct_infreq(room_type)
+  )
+
+fit = lm(price ~ stars + borough, data = nyc_airbnb)
+```
+
+Look at 'lm' stuff, but not very tidy.
+```{r, eval = FALSE}
+summary(fit)
+names(summary(fit))
+summary(fit)[["coefficients"]]
+summary(fit)[["df"]]
+
+fitted.values(fit)
+```
+
+Look at cleaner 'lm' stuff using broom function.
+```{r}
+fit |>
+  broom::tidy() |>
+  mutate(
+    term = str_replace(term, "borough", "Borough: ")
+  ) |>
+  select(term, estimate, p.value) |>
+  knitr::kable(digits = 3)
+
+fit |>
+  broom::glance()
+```
+
