@@ -1,0 +1,205 @@
+---
+title: "bootstrapping"
+output: github_document
+---
+
+```{r}
+library(tidyverse)
+library(p8105.datasets)
+library(modelr)
+```
+
+Simulate 2 datasets
+```{r}
+set.seed(1)
+n_samp = 250
+
+sim_df_const =
+  tibble(
+    x = rnorm(n_samp, 1, 1),
+    error = rnorm(n_samp, 0, 1),
+    y = 2 + 3 * x + error
+  )
+
+sim_df_nonconst =
+  sim_df_const |>
+  mutate(
+    error = .75 * error *x,
+    y = 2 + 3 * x + error
+  )
+```
+
+Look at these data
+```{r}
+sim_df_nonconst |>
+  ggplot(aes(x =x, y=y)) +
+  geom_point()
+```
+
+What does `lm` do for these?
+```{r}
+sim_df_const |>
+  lm(y ~ x, data = _) |>
+  broom::tidy() |>
+  knitr::kable(digits = 3)
+```
+
+Write a function that draws a bootsrtap sample
+```{r}
+boot_sample = function(df) {
+  sample_frac(df, size =1, replace = TRUE) # The replace = TRUE: Give me a different sample each time 
+  
+}
+```
+
+Does this work? 
+Get different bootstrap samples every time you run it, but from the same underlying dataset
+```{r}
+sim_df_nonconst |>
+  boot_sample() |>
+  ggplot(aes(x = x, y=y)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm", se = FALSE) +
+  xlim(c(-2,4)) +
+  ylim(c(-5,16))
+```
+
+To formalize this, extract results.
+```{r}
+boot_straps =
+  tibble(
+    iter = 1:5000
+  ) |>
+  mutate(
+    bootstrap_sample = map(iter, \(i) boot_sample(df = sim_df_nonconst))
+)
+```
+
+Quick check
+```{r}
+boot_straps |>
+  pull(bootstrap_sample) |>
+  nth(2) |>
+  ggplot(aes(x = x, y=y)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm", se = FALSE) +
+  xlim(c(-2,4)) +
+  ylim(c(-5,16))
+```
+
+Actually run my analyses!
+```{r}
+bootstrap_results =
+  boot_straps |>
+  mutate(
+    fits = map(bootstrap_sample, \(df) lm(y ~ x, data =df)),
+    results = map(fits, broom::tidy)
+  )
+```
+
+Look at results.
+```{r}
+bootstrap_results |>
+  select(iter, results) |>
+  unnest(results) |>
+  group_by(term) |>
+  summarize(
+    mean = mean(estimate),
+    se = sd(estimate)
+  )
+```
+
+Look at these first
+```{r}
+bootstrap_results |>
+  select(iter, results) |>
+  unnest(results) |>
+  filter(term == "x") |>
+  ggplot(aes(x = estimate)) +
+  geom_density()
+  
+```
+
+```{r}
+bootstrap_results |>
+  select(iter, results) |>
+  unnest(results) |>
+  group_by(term) |>
+  summarize(
+    ci_lower = quantile(estimate, 0.025),
+    ci_upper = quantile(estimate, 0.975)
+  )
+```
+
+
+## Do bootstrappinge exaple again but faster his time (more consilidated using modelr function)
+```{r}
+bootstrap_results =
+  sim_df_nonconst |>
+  bootstrap(n=10) |>
+  mutate(
+    df = map(strap, as_tibble),
+    fits = map(df, \(df) lm(y~x, data = df)),
+    results = map(fits, broom::tidy)
+  ) |>
+  select(.id, results) |>
+  unnest(results)
+```
+
+```{r}
+bootstrap_results |>
+  group_by(term) |>
+  summarize(
+    mean = mean(estimate),
+    sd = sd(estimate)
+  )
+```
+
+If you don't trust assumptions, run bootstrap and check using Airbnb dataset
+```{r}
+data("nyc_airbnb")
+
+#data cleaning
+nyc_airbnb =
+  nyc_airbnb |>
+  mutate(stars = review_scores_location / 2) |>
+  rename(
+    borough = neighbourhood_group
+  ) |>
+  filter(
+    borough != "Staten Island"
+  ) |>
+  drop_na(price, stars, room_type) |>
+  select(price, stars, room_type, borough)
+```
+
+What does this look like?
+```{r}
+nyc_airbnb |>
+  ggplot(aes(x = stars, y = price, color = room_type)) +
+  geom_point(alpha = .5)
+```
+
+Try to do the bootsrap
+```{r}
+airbnb_bootstrap_results =
+  nyc_airbnb |>
+  filter(borough == "Manhattan") |>
+  bootstrap(n =1000) |>
+  mutate(
+    df = map(strap, as_tibble),
+    fits = map(df, \(df) lm(price ~ stars + room_type, data = df)),
+    results = map(fits, broom::tidy)
+  ) |>
+  select(.id, results) |>
+  unnest(results)
+```
+
+Look at the distribution of the slope for stars (ratings of airbnbs)
+```{r}
+airbnb_bootstrap_results |>
+  filter(term == "stars") |>
+  ggplot(aes(x = estimate)) +
+  geom_density()
+```
+
